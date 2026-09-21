@@ -1,7 +1,7 @@
 ---
 name: reveal-winspc-plc
-description: Consulta y explica datos de proceso (PLC Siemens S7-1200) y de calidad (WinSPC) de la línea Bloquelón de Ladrillera Santafe a través del MCP de Reveal. Úsalo siempre que la pregunta trate sobre esta planta: variables del horno o del secadero, setpoints, temperaturas, presiones, humedades, granulometría, absorción, alabeo, capacidad de proceso, Cp, Cpk, Ppk, lotes, referencia de laboratorio, conformidad contra el Plan de Calidad, o salud de los instrumentos. Actívalo también ante nombres de tag como Kiln Vault, Dryer Zone, Extruder Pressure, Smoke Stack, Equilibrium P3, o al mencionar Reveal, WinSPC, Arcillas, Soacha o Bloquelón. Contiene la convención de cálculo 2σ propia de esta instalación, la correspondencia de unit_id que el MCP no resuelve, y las trampas verificadas del dato.
-license: Propiedad de GSS Analytix. Uso interno y de cliente.
+description: "Consulta y explica datos de proceso (PLC Siemens S7-1200) y de calidad (WinSPC) de la linea Bloquelon de Ladrillera Santafe a traves del MCP de Reveal. Usalo siempre que la pregunta trate sobre esta planta - variables del horno o del secadero, setpoints, temperaturas, presiones, humedades, granulometria, absorcion, alabeo, capacidad de proceso, Cp, Cpk, Ppk, lotes, referencia de laboratorio, conformidad contra el Plan de Calidad, o salud de los instrumentos. Activalo tambien ante nombres de tag como Kiln Vault, Dryer Zone, Extruder Pressure, Smoke Stack, Equilibrium P3, o al mencionar Reveal, WinSPC, Arcillas, Soacha o Bloquelon. Contiene la convencion de calculo 2-sigma propia de esta instalacion, la correspondencia de unit_id que el MCP no resuelve, y las trampas verificadas del dato."
+license: "Propiedad de GSS Analytix. Uso interno y de cliente."
 ---
 
 # Agente de Consulta de Proceso y Calidad · Ladrillera Santafe
