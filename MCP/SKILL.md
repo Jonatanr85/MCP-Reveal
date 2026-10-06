@@ -1,143 +1,98 @@
-# name: MCP Reveal
+---
+name: mcp-reveal
+description: Referencia técnica del servidor MCP Reveal (plataforma de monitoreo por cliente, sitio y componente). Úsala cuando el usuario pregunte qué herramientas ofrece el MCP Reveal, cómo encadenarlas, qué es el grafo BRICS, o cuando una respuesta de estas herramientas sea vacía, confusa o inconsistente y haya que depurarla.
+---
 
-Skill de referencia técnica, portable a cualquier IA/agente con acceso al MCP Reveal.
-No asume ningún cliente, sistema o proceso de negocio: cubre únicamente el contrato de
-las herramientas, cómo se relacionan entre sí, y el modelo de grafo que exponen.
+# MCP Reveal — referencia de herramientas y grafo BRICS
 
-**Activar cuando:** el usuario pregunte qué herramientas tiene disponibles el MCP Reveal,
-cómo se relacionan entre sí, qué es el grafo BRICS, cómo encadenar llamadas, o pida ayuda
-para depurar/entender una respuesta de alguna de estas herramientas.
+## 0. Prerrequisitos (leer primero)
 
-**Nota de alcance:** existe un servidor MCP distinto (también llamado "Reveal" en algunos
-entornos) con herramientas de nombre similar (`get_node`, `get_neighbors`, `query_graph`,
-`shortest_path`, `list_prs`, etc.) que opera sobre un grafo de conocimiento de código/PRs
-de un repositorio — no tiene relación con lo descrito aquí. Si el usuario menciona nodos,
-PRs o repositorios, confirma primero cuál de los dos servidores está usando antes de aplicar
-esta skill.
+Este archivo es documentación. No da acceso al servidor. Para usar las herramientas, el cliente de IA debe tener el servidor MCP Reveal configurado y autenticado:
 
-## 1. Modelo mental
+- URL del servidor MCP: `https://mcp.gssanalytix.com/mcp`
+- Tipo de transporte: HTTP streamable (remoto). Si tu cliente solo admite SSE o stdio, usa un puente como `mcp-remote`.
+- Autenticación: OAuth. Sin sesión autenticada, el servidor responde 401. El cliente debe completar el flujo de inicio de sesión en el navegador la primera vez.
 
-El MCP Reveal expone datos de una plataforma de monitoreo jerárquica:
+Reglas para la IA que lee este archivo:
+
+1. Verifica que las herramientas de la sección 3 existan en tu lista de herramientas. Si no existen, informa al usuario que el servidor MCP no está conectado. No inventes datos ni respuestas.
+2. Los nombres de herramienta pueden venir con prefijo según el cliente (ej. `mcp__MCP_Reveal__get_events`, `reveal_get_events`). Identifica cada herramienta por su sufijo (`get_events`).
+3. El esquema real de cada herramienta en tu entorno tiene prioridad sobre este documento. Si un parámetro difiere, usa el del esquema.
+4. Los recursos `reveal://data-model` y `reveal://rule-handlers` pueden no estar disponibles en tu cliente. No dependas de ellos.
+
+## 1. Modelo de datos
 
 ```
 Cliente (client_id)
   └─ Sitio (site_id)
        └─ Componente instalado (site_component_id)
-            ├─ Reglas de notificación (rule_id)
-            ├─ Eventos/alertas (activaciones de esas reglas)
-            ├─ Mediciones (lecturas de variables/unidades)
+            ├─ Reglas (rule_id)
+            ├─ Eventos / alertas (activaciones de reglas)
+            ├─ Mediciones (variables / unidades)
             └─ Relaciones BRICS (aristas hacia otros componentes)
 ```
 
-Todas las herramientas requieren `client_id` salvo `clients()`, `auth_status()`,
-`logout()` y `list_type_components()`/`list_variables()` (catálogos globales, sin scope
-de cliente).
+- `client_id` es siempre el numérico que devuelve `clients()`. Si el usuario da un ID que no aparece ahí, no lo uses.
+- Todas las herramientas requieren `client_id`, excepto: `clients`, `auth_status`, `logout`, `list_type_components`, `list_variables`.
+- `component_id` tiene dos significados. En `get_site_components` es el tipo de dispositivo (catálogo global). En `get_component_rules` y `get_component_relations` el parámetro llamado `component_id` es en realidad un `site_component_id` (el `id` devuelto por `get_site_components`).
 
-`client_id` es SIEMPRE el numérico devuelto por `clients()`. No debe confundirse con
-ningún identificador de cliente de otro sistema o plataforma — si el usuario da un ID
-que no aparece en `clients()`, no lo asumas válido; resuélvelo primero.
-
-## 2. Autenticación
-
-| Herramienta | Uso |
-|---|---|
-| `auth_status()` | Devuelve `{authenticated, user, reason}`. `reason="logged_out"` solo aparece si esta sesión llamó `logout()`; su ausencia NO implica `authenticated=true` — revisa ese campo directamente. |
-| `logout()` | Revoca el token de la sesión. Irreversible dentro de la sesión — no hay forma de reautenticar sin que el conector se reconecte. Úsala solo si el usuario lo pide explícitamente. |
-
-## 3. Catálogos y resolución de identificadores
-
-Estas herramientas no dependen de conocer IDs de antemano — son el punto de entrada.
-
-| Herramienta | Qué resuelve | Notas |
-|---|---|---|
-| `clients()` | Lista de organizaciones cliente accesibles al token | Sin paginación (catálogo pequeño). Un token de un solo cliente solo ve ese uno. |
-| `list_sites(client_id)` | Sitios (edificios/instalaciones) de un cliente | `sites[].country` es un ID numérico legado de calendario de festivos, NO un código ISO — usa `country_iso`/`country_name`. |
-| `get_site_components(client_id, site_id)` | Todos los dispositivos físicos instalados en un sitio | Devuelve `{id (=site_component_id), description, component_id, component_name}`. `component_id` aquí es la referencia al catálogo global de tipos — no confundir con `site_component_id`. |
-| `list_type_components()` | Catálogo global de ~150+ tipos de dispositivo (referencia, no instalados) | Úsalo para interpretar `component_id` de `get_site_components`. |
-| `list_variables()` | Catálogo global de variables de medición/unidades | `unit_id` en `Rule`/`Event` referencia este catálogo (ej. unit_id=3 → "Celsius"). |
-| `find_assets(client_id, q, type?)` | Resuelve texto libre ("router bogota") a IDs exactos con su cadena de padres | Sustituye el encadenado manual `clients → list_sites → get_site_components`. `type` puede ser `client`/`site`/`component` (omitir para buscar en los tres); `variable` NO está soportado. Revisa el campo `partial` antes de concluir que algo no existe — una falla parcial en un tipo puede lucir igual que un resultado vacío real. |
-
-## 4. Estado operativo (qué está pasando ahora / qué pasó)
-
-| Herramienta | Para qué | Detalles clave |
-|---|---|---|
-| `get_current_state(client_id, scope_type, scope_id?, anchor_id?, anchor_type?, recent_days?)` | Snapshot de costo fijo: alertas abiertas, top-N por severidad, conteo de eventos recientes y (salvo `scope_type="client"`) frescura de datos por componente | `scope_type`: `client`\|`site`\|`component`\|`variable`. Para `variable` se requieren `anchor_id`+`anchor_type` (`site`\|`component`). Es un triage rápido, NO exhaustivo — `alerts[]` es top-N, no la lista completa. |
-| `get_alerts(client_id, ...)` | Notificaciones clasificadas como alerta (subconjunto estricto de `get_events`) | `statuses` por defecto `"active"` (abiertas). Filtrar solo por `site_component_id` activa una ventana implícita de 1 día — usa `range_id` para ampliarla y revisa `window.source`/`window.empty_result_note` antes de concluir que no hay historial. |
-| `get_events(client_id, ...)` | Historial completo de notificaciones (tabla completa, no solo alertas) | `is_alert=true` marca las que también son alerta. Paginación por `start`+`limit` (offset) o `min_id` (cursor) — no mezclar ambos. Orden por defecto pone `status="pending"` primero (su `activated_at` es null y los NULL ordenan antes en DESC) — ordena localmente si necesitas orden cronológico real. |
-| `get_summary(client_id, ...)` | Reportes pre-agregados del motor de reglas (rules-engine output), NO telemetría cruda ni estado en vivo | Cada fila es una corrida sobre una ventana ROLLING, no un período de calendario — nunca sumar entre filas, se solapan. `summaries[]` vacío significa que el pipeline no corrió para ese scope (revisar `latest_available`/`empty_result_note`), no "sin eventos". `period` define el TIPO de reporte, no un filtro de fecha (usar `date`/`date_from`+`date_to` para eso). `trend`/`advanced_stats`/`correlation` siempre usan ventana fija de 90 días sin importar `period`. |
-| `get_measurements(client_id, ...)` | Telemetría/lecturas del datafeed (`datalog`), agregada por defecto | Dos modos: componente único (`site_component_id`, recomendado, soporta cursor `after_id`) o feed (`site_id`/`site_component_ids`, requiere cursor `start` — que es un ID, NO un offset). Ventana obligatoria: `recent_days` (máx. 30) o `date_from`+`date_to`. `limit` se ignora si `raw=False` (agregado escanea toda la ventana internamente); si `window_truncated=True`, el agregado no cubre toda la ventana pedida — hay que acotarla o usar `raw=True`. |
-
-## 5. Reglas de notificación
-
-| Herramienta | Alcance | Notas |
-|---|---|---|
-| `get_site_rules(client_id, site_id)` | Reglas aplicadas a todos los dispositivos de un sitio | No hay campo de conteo de activas — filtrar `rules[]` por `status` localmente. 17 tipos de handler (ver `reveal://rule-handlers`). |
-| `get_component_rules(client_id, component_id)` | Reglas de un único dispositivo | Mismo shape que `get_site_rules`. `component_id` aquí es un `site_component_id`, pese al nombre del parámetro. |
-| `get_rule_custom_overrides(client_id, ...)` | Overrides de parámetros de regla por sitio/componente/cliente (el más específico gana) | `reconnection_method` es un entero (0=automático, >0=manual) — distinto del enum de texto que trae `Rule`, no compararlos directamente. `site_component_id=0` REQUIERE `site_id` (filtra localmente filas con scope 0). Un `site_id`/`site_component_id` inexistente → 404 (`ENTITY_NOT_FOUND`); un `rule_id` sin coincidencias → 200 con `triggers[]` vacío — no confundir "no encontrado" con "sin resultados". |
-| `get_rule_classifications(client_id, rule_id?, site_id?)` | Mapeo regla → clasificación de alerta y severidad real | Es la fuente de verdad de severidad (el campo `severity` en `Rule`/`get_events` es un nombre engañoso). Una fila con `site_id` sobrescribe la fila de nivel cliente (`site_id=null`) solo para ese sitio. El filtrado por `rule_id`/`site_id` en upstream se ignora — esta herramienta trae la lista completa del cliente y filtra localmente. Pasar `rule_id` también devuelve `effective`, la fila aplicable resuelta. |
-
-## 6. El grafo BRICS (topología de conexiones físicas/operativas)
-
-BRICS modela cómo los componentes instalados se conectan entre sí: alimentación
-eléctrica, flujo de datos, suministro, etc. (ej. tipos de arista: `powers`,
-`sendsDataTo`, `suppliesFuelTo`). Es un grafo dirigido: **vértices** = componentes
-instalados (`site_component_id`), **aristas** = relaciones entre ellos.
-
-| Herramienta | Alcance | Notas |
-|---|---|---|
-| `list_brick_vertices(client_id, label?, source_type?, limit?, start?)` | Vértices accesibles al cliente, a nivel de TODO el cliente (no un sitio) | Solo incluye componentes que participan en ≥1 relación — NO es el inventario completo (para eso, `get_site_components`). Ordenado por `id` ascendente; paginar con `start`+`limit` hasta `has_more=false`. |
-| `list_brick_edges(client_id, limit?, start?)` | Todas las aristas accesibles al cliente, a nivel de TODO el cliente | Evita iterar `get_site_relations`/`get_component_relations` sitio por sitio. Mismos endpoints que `list_brick_vertices` (solo componentes con ≥1 relación). Mismo patrón de paginación. |
-| `get_site_relations(client_id, site_id)` | Topología completa de UN sitio | `edges[]` es la única fuente viva aquí — los campos legados `outgoing_edges[]`/`incoming_edges[]`/`outgoing_count`/`incoming_count` están deprecados y SIEMPRE vacíos/0 en esta herramienta (a diferencia de `get_component_relations`, donde el equivalente sí está vivo). |
-| `get_component_relations(client_id, component_id)` | Conexiones directas de UN dispositivo | Aquí `outgoing_edges[]`/`incoming_edges[]`/`outgoing_count`/`incoming_count` SÍ son el payload vivo (inverso de `get_site_relations`). Requiere primero `get_site_components` para obtener `component_id` (= `site_component_id`). |
-| `get_component_relations_bulk(client_id, site_component_ids, direction?)` | Relaciones BRICS de varios componentes en una sola llamada | `direction` por defecto `"both"` en esta herramienta (distinto del default de upstream, que es `"out"` si se omite). `"out"` = solo relaciones donde el ID es origen — un receptor puro (ej. algo que solo recibe una arista `powers`) devuelve 0 filas aunque tenga relaciones reales; usar `"both"` o `"in"` para verlas. IDs deben ser enteros positivos separados por coma — tokens malformados → `VALIDATION_ERROR`; si todos son válidos pero ninguno es accesible para ese `client_id` → 422 de upstream. |
-
-**Regla práctica:** si necesitas la topología de UN sitio o UN componente, usa
-`get_site_relations`/`get_component_relations`. Si necesitas explorar o auditar
-el grafo completo de un cliente (buscar patrones, tipos de arista, componentes
-huérfanos), usa `list_brick_vertices`/`list_brick_edges` para no iterar sitio por sitio.
-
-## 7. Directorio de acceso (no operativo)
-
-| Herramienta | Qué es |
-|---|---|
-| `list_client_users(client_id)` | Directorio de personas con cuenta en la plataforma para ese cliente, con su rol. Es control de acceso, NO datos operativos — los usuarios nunca son referenciados por reglas, eventos ni el grafo BRICS, y no sirven como scope de ninguna otra herramienta. Sin paginación ni filtros — hacer match local por nombre/email. Es información personal: repórtala si el usuario la pide, no la muestres sin que la pidan. Para destinatarios de notificaciones de alertas, usar `get_site_rules`/`get_rule_custom_overrides`, no esto. |
-
-## 8. Convenciones que rompen expectativas (checklist rápido)
-
-- `component_id` significa DOS cosas distintas según el contexto: catálogo global de
-  tipos (`list_type_components`) vs. dispositivo instalado (parámetro de
-  `get_component_relations`/`get_component_rules`, que en realidad es un
-  `site_component_id`). Verificar siempre cuál aplica antes de usarlo.
-- Filtrar `get_events`/`get_alerts` solo por `site_component_id` activa una ventana
-  implícita de 1 día — pasar `range_id` o `date_from`+`date_to` si se necesita más.
-- `get_current_state.alerts[]` es top-N, no exhaustivo — comparar contra `open_alerts`
-  antes de asumir que la lista está completa.
-- `get_summary` nunca se suma entre filas (ventanas rolling que se solapan) y `period`
-  no es un filtro de fecha.
-- `get_measurements` con `raw=False` ignora `limit` y puede truncar silenciosamente
-  (`window_truncated=True`) sin cubrir toda la ventana pedida.
-- Campos deprecados que devuelven vacío/0 en una herramienta pero viven en otra
-  (`outgoing_edges`/`incoming_edges`/`*_count`): vivos en `get_component_relations`,
-  muertos en `get_site_relations`.
-- `Rule.severity` no es la severidad real de alerta — la fuente de verdad es
-  `get_rule_classifications`.
-- Un resultado vacío de `find_assets` puede ser una falla parcial de upstream, no una
-  ausencia real — revisar `partial` antes de concluir que algo no existe.
-- 404 (`ENTITY_NOT_FOUND`) ≠ 200 con lista vacía: la primera es "no existe", la segunda
-  es "existe pero sin datos que coincidan" — no tratarlas igual.
-
-## 9. Encadenamiento típico
+## 2. Flujo típico
 
 ```
-clients()
-  → list_sites(client_id)
-      → get_site_components(client_id, site_id)     # inventario
-      → get_site_relations(client_id, site_id)       # topología del sitio
-      → get_current_state(client_id, "site", site_id) # triage rápido
-          → get_alerts / get_events (si se necesita el detalle completo)
-              → get_component_rules(client_id, site_component_id)  # por qué se disparó
-                  → get_rule_classifications(client_id, rule_id)   # severidad real
+clients
+ → list_sites
+    → get_site_components      (inventario)
+    → get_site_relations       (topología del sitio)
+    → get_current_state        (triage rápido)
+       → get_alerts / get_events   (detalle)
+          → get_component_rules    (qué regla se disparó)
+             → get_rule_classifications  (severidad real)
 ```
 
-`find_assets` puede saltarse los primeros pasos cuando se conoce el nombre en texto
-libre del recurso buscado, en vez de encadenar manualmente.
+`find_assets` permite saltar los primeros pasos a partir de un nombre en texto libre.
+
+## 3. Herramientas (23)
+
+### Autenticación
+- `auth_status`: devuelve `authenticated`, `user`, `reason`. Revisa `authenticated` directamente; la ausencia de `reason="logged_out"` no implica sesión válida.
+- `logout`: revoca el token de la sesión y es irreversible. Solo si el usuario lo pide.
+
+### Catálogos y resolución de IDs
+- `clients`: lista de clientes accesibles. Sin paginación.
+- `list_sites`: sitios de un cliente. `country` es un ID legado de calendario; usa `country_iso` / `country_name`.
+- `get_site_components`: dispositivos instalados en un sitio. Devuelve `id` (= `site_component_id`), `description`, `component_id`, `component_name`.
+- `list_type_components`: catálogo global de tipos de dispositivo. Interpreta `component_id`.
+- `list_variables`: catálogo global de variables/unidades. `unit_id` en reglas y eventos referencia este catálogo.
+- `find_assets(client_id, q, type?, limit?)`: resuelve texto libre (`q`, mínimo 2 caracteres) a IDs con su cadena de padres. `type`: client | site | component; si se omite busca en los tres. `limit` 1–50 (por defecto 10). `variable` no está soportado. `component` significa equipo instalado, no el catálogo de tipos. Revisa el campo `partial` antes de concluir que algo no existe.
+
+### Estado operativo
+- `get_current_state`: snapshot de costo fijo. `scope_type` = client | site | component | variable (variable requiere `anchor_id` y `anchor_type`). `alerts[]` es un top-N, no la lista completa; compáralo con `open_alerts`.
+- `get_alerts`: alertas (subconjunto de eventos). Por defecto solo `active`. Si filtras solo por `site_component_id`, la ventana implícita es de 1 día; pasa `range_id` o `date_from` + `date_to`. Revisa `window.empty_result_note` antes de concluir que no hay historial.
+- `get_events`: historial completo de notificaciones. `is_alert=true` marca las que son alerta. Pagina con `start` + `limit` o con `min_id`, sin mezclar. Los eventos `pending` pueden salir primero; ordena localmente si necesitas orden cronológico.
+- `get_summary`: reportes pre-agregados del motor de reglas, sobre ventanas móviles que se solapan. Nunca sumes filas entre sí. `summaries[]` vacío significa que el pipeline no corrió, no que no hubo eventos. `period` define el tipo de reporte, no un filtro de fecha.
+- `get_measurements`: telemetría. Modo componente (`site_component_id`, recomendado) o modo feed (`site_id` / `site_component_ids` con cursor `start`, que es un ID y no un offset). Ventana obligatoria: `recent_days` (máx. 30) o `date_from` + `date_to`. Con `raw=false` se ignora `limit`; si `window_truncated=true`, el agregado no cubre toda la ventana.
+
+### Reglas
+- `get_site_rules`: reglas de un sitio. No trae conteo de activas; filtra `rules[]` por `status`.
+- `get_component_rules`: reglas de un dispositivo (usa `site_component_id`).
+- `get_rule_custom_overrides`: overrides de parámetros por sitio, componente o cliente (gana el más específico). `reconnection_method` es entero aquí, no el texto que trae `Rule`. 404 `ENTITY_NOT_FOUND` significa que no existe; 200 con lista vacía significa que existe sin coincidencias.
+- `get_rule_classifications`: fuente de verdad de la severidad de alertas. El campo `severity` de `Rule` y de `get_events` no es la severidad real. Una fila con `site_id` sobrescribe la de nivel cliente solo para ese sitio. Con `rule_id`, devuelve `effective`.
+
+### Grafo BRICS
+Grafo dirigido: vértices = componentes instalados, aristas = relaciones (ej. `powers`, `sendsDataTo`, `suppliesFuelTo`).
+- `get_site_relations`: topología de un sitio. Usa `edges[]`; los campos `outgoing_edges`, `incoming_edges` y los `*_count` están deprecados y vacíos aquí.
+- `get_component_relations`: conexiones de un componente. Aquí `outgoing_edges` / `incoming_edges` y sus conteos sí son los campos vivos.
+- `get_component_relations_bulk`: varios componentes en una llamada. `direction`: out | in | both (por defecto `both`). Un receptor puro devuelve 0 filas con `out`; usa `both` o `in` (verificado en vivo: con `out` devolvió `total: 0` y sin `direction` devolvió la relación entrante). Cada relación trae `from_vertex_id`, `to_vertex_id`, `label` (ej. `sendsDataTo`), `relation_name_from`, `relation_name_to` y `component_from` / `component_to`. El campo `direction` (`incoming`) solo viene poblado en modo `both`. IDs separados por coma, enteros positivos.
+- `list_brick_vertices(client_id, label?, source_type?, limit?, start?)`: vértices de todo el cliente. `label` filtra por descripción (coincidencia parcial) y `source_type` por tipo de componente. Solo incluye componentes con al menos una relación; no es el inventario completo. `limit` máx. 1000. Pagina con `start` + `limit` hasta `has_more=false`.
+- `list_brick_edges`: aristas de todo el cliente, mismo patrón de paginación. Úsala para auditar el grafo completo sin iterar sitio por sitio.
+
+### Directorio de acceso
+- `list_client_users`: personas con cuenta y su rol. Es control de acceso, no datos operativos. Es información personal: solo si el usuario la pide. Sin paginación; filtra localmente.
+
+## 4. Reglas de rigor
+
+- Todo dato debe provenir de llamadas hechas en esta sesión. Nunca de memoria ni de ejemplos.
+- Si una llamada falla o devuelve vacío, repórtalo explícitamente. No lo rellenes.
+- Pagina hasta agotar resultados (`has_more`, `total_records`) o advierte que los datos son parciales.
+- Distingue "no existe" (404) de "existe sin datos" (200 vacío).
+- No muestres IDs internos al usuario final salvo que los pida.
