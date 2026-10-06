@@ -1,5 +1,5 @@
 ---
-name: winspc-ladrillera-santafe
+name: WINSPC
 description: >-
   Responde preguntas de CALIDAD Y LABORATORIO de la linea Bloquelon de Ladrillera Santafe
   (cliente 62, sitio 1327 planta Arcillas) con el MCP de Reveal. Usala para WinSPC,
