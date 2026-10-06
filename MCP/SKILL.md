@@ -1,57 +1,94 @@
 ---
 name: mcp-reveal
-description: Referencia técnica del servidor MCP Reveal (plataforma de monitoreo por cliente, sitio y componente). Úsala cuando el usuario pregunte qué herramientas ofrece el MCP Reveal, cómo encadenarlas, qué es el grafo BRICS, o cuando una respuesta de estas herramientas sea vacía, confusa o inconsistente y haya que depurarla.
+description: Procedimiento para consultar datos del servidor MCP Reveal (inventario, estado, alertas, eventos, mediciones, reglas y topología BRICS) resolviendo primero los IDs y validando cada respuesta. Úsalo cuando el usuario pida datos de la plataforma Reveal o pida depurar una respuesta vacía o inconsistente de sus herramientas.
 ---
 
-# MCP Reveal — referencia de herramientas y grafo BRICS
+# Consultar el MCP Reveal
 
-## 0. Prerrequisitos (leer primero)
+Procedimiento de 5 pasos. Sigue el orden. Entrada: una solicitud del usuario sobre datos de Reveal. Salida: una respuesta con hallazgo, evidencia y limitaciones, basada solo en llamadas hechas en esta sesión.
 
-Este archivo es documentación. No da acceso al servidor. Para usar las herramientas, el cliente de IA debe tener el servidor MCP Reveal configurado y autenticado:
+## Paso 0. Verificar conexión
+
+1. Comprueba que existan las herramientas del Anexo A en tu lista (identifícalas por sufijo, ej. `get_events`; el prefijo varía por cliente).
+2. Llama `auth_status`. Si `authenticated` no es `true`, detente.
+3. Si falta alguna herramienta o no hay sesión, informa al usuario que el servidor MCP no está conectado y cita la configuración del Anexo B. No inventes datos.
+
+## Paso 1. Clasificar la solicitud
+
+| Si el usuario pide... | Herramientas principales |
+|---|---|
+| Qué equipos hay en un sitio | `get_site_components` (+ `list_type_components` para interpretar tipos) |
+| Cómo está algo ahora | `get_current_state`, luego `get_alerts` para el detalle |
+| Historial de fallas o eventos | `get_events` con ventana explícita |
+| Valores de variables o telemetría | `get_measurements` con ventana explícita (+ `list_variables`) |
+| Por qué se disparó una alerta o su severidad | `get_component_rules` / `get_site_rules`, `get_rule_classifications` |
+| Cómo se conectan los equipos | `get_site_relations`, `get_component_relations`, o `list_brick_edges` para todo el cliente |
+| Reportes pre-agregados del motor de reglas | `get_summary` |
+| Personas con acceso | `list_client_users` (solo si lo piden) |
+
+## Paso 2. Resolver identificadores
+
+1. Si el usuario nombró un recurso en texto libre, llama `find_assets` (revisa `partial` antes de concluir que no existe).
+2. Si no, usa `clients` y haz coincidencia parcial sin distinguir mayúsculas; luego `list_sites` y `get_site_components`.
+3. Si hay 0 o más de 1 coincidencia razonable, muestra las opciones y pregunta. No asumas.
+4. `client_id` es siempre el que devuelve `clients()`. Un ID dado por el usuario que no aparezca ahí no se usa.
+5. En `get_component_rules` y `get_component_relations`, el parámetro `component_id` es un `site_component_id` (el `id` de `get_site_components`), no el tipo de dispositivo.
+
+## Paso 3. Ejecutar la consulta
+
+- Pasa siempre una ventana explícita en `get_events`, `get_alerts` y `get_measurements` (`range_id`, `recent_days` o `date_from` + `date_to`). Filtrar solo por `site_component_id` aplica una ventana implícita de 1 día.
+- Pagina mientras `has_more` sea verdadero o `total_records` supere lo recibido.
+- Usa `get_current_state` solo como triage: su `alerts[]` es un top-N. Si `open_alerts` es mayor, confirma con `get_alerts`.
+
+## Paso 4. Validar el resultado
+
+Antes de responder, revisa:
+- `has_more` / `total_records`: ¿cubres todo? Si no, dilo.
+- `partial` (en `find_assets`) y `window.empty_result_note` (en eventos y alertas): un vacío puede ser una falla parcial o una ventana corta.
+- `window_truncated` (en `get_measurements`): si es verdadero, el agregado no cubre la ventana.
+- 404 `ENTITY_NOT_FOUND` significa que no existe; 200 con lista vacía significa que existe sin coincidencias. No los trates igual.
+- `get_summary`: nunca sumes filas entre sí; `summaries[]` vacío significa que el pipeline no corrió.
+- Severidad real: viene de `get_rule_classifications`, no del campo `severity` de `Rule` ni de `get_events`.
+
+## Paso 5. Responder
+
+Formato: (1) hallazgo en una frase, (2) evidencia (cifras y fechas devueltas por las herramientas), (3) limitaciones (ventana usada, datos parciales, vacíos). No muestres IDs internos salvo que el usuario los pida. Si una llamada falló, repórtalo.
+
+## Criterios de éxito
+
+- Todo dato citado proviene de una llamada de esta sesión.
+- Se resolvieron los IDs antes de consultar (Paso 2).
+- La ventana de tiempo fue explícita.
+- Las limitaciones del Paso 4 quedaron declaradas.
+
+## Casos de prueba
+
+1. "Qué equipos tiene el sitio X del cliente Y": debe llamar `clients` (o `find_assets`), `list_sites`, `get_site_components`, y responder con totales por tipo.
+2. "Qué alertas críticas hay abiertas en el sitio X": debe llamar `get_current_state` y luego `get_alerts` con `statuses=active`, y comparar el conteo con `open_alerts`.
+3. "A qué equipos alimenta el equipo Z": debe llamar `find_assets`, luego `get_component_relations`, y reportar las aristas con su dirección.
+4. Sin conexión al MCP: debe detenerse en el Paso 0 e informar, sin devolver datos.
+
+## Anexo B. Configuración requerida del cliente de IA
 
 - URL del servidor MCP: `https://mcp.gssanalytix.com/mcp`
-- Tipo de transporte: HTTP streamable (remoto). Si tu cliente solo admite SSE o stdio, usa un puente como `mcp-remote`.
-- Autenticación: OAuth. Sin sesión autenticada, el servidor responde 401. El cliente debe completar el flujo de inicio de sesión en el navegador la primera vez.
+- Transporte esperado: HTTP streamable (remoto), pendiente de confirmar. Si el cliente solo admite SSE o stdio, usa un puente como `mcp-remote`.
+- Autenticación esperada: OAuth. Sin sesión, el servidor responde 401.
 
-Reglas para la IA que lee este archivo:
-
-1. Verifica que las herramientas de la sección 3 existan en tu lista de herramientas. Si no existen, informa al usuario que el servidor MCP no está conectado. No inventes datos ni respuestas.
-2. Los nombres de herramienta pueden venir con prefijo según el cliente (ej. `mcp__MCP_Reveal__get_events`, `reveal_get_events`). Identifica cada herramienta por su sufijo (`get_events`).
-3. El esquema real de cada herramienta en tu entorno tiene prioridad sobre este documento. Si un parámetro difiere, usa el del esquema.
-4. Los recursos `reveal://data-model` y `reveal://rule-handlers` pueden no estar disponibles en tu cliente. No dependas de ellos.
-
-## 1. Modelo de datos
+## Anexo C. Modelo de datos
 
 ```
 Cliente (client_id)
   └─ Sitio (site_id)
        └─ Componente instalado (site_component_id)
             ├─ Reglas (rule_id)
-            ├─ Eventos / alertas (activaciones de reglas)
+            ├─ Eventos / alertas
             ├─ Mediciones (variables / unidades)
             └─ Relaciones BRICS (aristas hacia otros componentes)
 ```
 
-- `client_id` es siempre el numérico que devuelve `clients()`. Si el usuario da un ID que no aparece ahí, no lo uses.
-- Todas las herramientas requieren `client_id`, excepto: `clients`, `auth_status`, `logout`, `list_type_components`, `list_variables`.
-- `component_id` tiene dos significados. En `get_site_components` es el tipo de dispositivo (catálogo global). En `get_component_rules` y `get_component_relations` el parámetro llamado `component_id` es en realidad un `site_component_id` (el `id` devuelto por `get_site_components`).
+Todas las herramientas requieren `client_id`, excepto `clients`, `auth_status`, `logout`, `list_type_components` y `list_variables`.
 
-## 2. Flujo típico
-
-```
-clients
- → list_sites
-    → get_site_components      (inventario)
-    → get_site_relations       (topología del sitio)
-    → get_current_state        (triage rápido)
-       → get_alerts / get_events   (detalle)
-          → get_component_rules    (qué regla se disparó)
-             → get_rule_classifications  (severidad real)
-```
-
-`find_assets` permite saltar los primeros pasos a partir de un nombre en texto libre.
-
-## 3. Herramientas (23)
+## Anexo A. Herramientas (23)
 
 ### Autenticación
 - `auth_status`: devuelve `authenticated`, `user`, `reason`. Revisa `authenticated` directamente; la ausencia de `reason="logged_out"` no implica sesión válida.
@@ -89,10 +126,3 @@ Grafo dirigido: vértices = componentes instalados, aristas = relaciones (ej. `p
 ### Directorio de acceso
 - `list_client_users`: personas con cuenta y su rol. Es control de acceso, no datos operativos. Es información personal: solo si el usuario la pide. Sin paginación; filtra localmente.
 
-## 4. Reglas de rigor
-
-- Todo dato debe provenir de llamadas hechas en esta sesión. Nunca de memoria ni de ejemplos.
-- Si una llamada falla o devuelve vacío, repórtalo explícitamente. No lo rellenes.
-- Pagina hasta agotar resultados (`has_more`, `total_records`) o advierte que los datos son parciales.
-- Distingue "no existe" (404) de "existe sin datos" (200 vacío).
-- No muestres IDs internos al usuario final salvo que los pida.
