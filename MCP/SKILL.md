@@ -1,4 +1,4 @@
-# SKILL: Referencia de herramientas y grafos — MCP Reveal
+# MCP_REVEAL: Referencia de herramientas y grafos — MCP Reveal
 
 Skill de referencia técnica, portable a cualquier IA/agente con acceso al MCP Reveal.
 No asume ningún cliente, sistema o proceso de negocio: cubre únicamente el contrato de
