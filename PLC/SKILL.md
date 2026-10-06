@@ -1,5 +1,5 @@
 ---
-name: plc-ladrillera-santafe
+name: PLC
 description: >-
   Responde preguntas de PROCESO Y TELEMETRIA de la linea Bloquelon de Ladrillera Santafe
   (cliente 62, sitio 1327 planta Arcillas, componente 35797) con el MCP de Reveal. Usala
